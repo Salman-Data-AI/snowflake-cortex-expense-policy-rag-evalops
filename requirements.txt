@@ -1,0 +1,10 @@
+# Runtime: pipeline steps, the app and the evaluation (used by run-pipeline.yml).
+# Snowflake CLI is installed separately with pipx: its dependencies conflict with trulens-connectors-snowflake.
+snowflake-snowpark-python>=1.30
+snowflake.core>=1.0             # Cortex Search Python API
+trulens-core>=2.15
+trulens-connectors-snowflake>=2.15
+trulens-providers-cortex>=2.15
+pandas>=2.0
+pyyaml>=6.0
+sqlalchemy>=2.0,<2.1           # snowflake-sqlalchemy (used by TruLens) breaks on 2.1

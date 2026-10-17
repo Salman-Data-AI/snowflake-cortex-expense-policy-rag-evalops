@@ -1,0 +1,2 @@
+# sqlfluff's Snowflake dialect can't parse CREATE CORTEX SEARCH SERVICE yet.
+pipeline/03_search.sql

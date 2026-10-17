@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+dcm/out/
+out/
+*.p8
+*.pub
+.snowflake_key.p8
+.env
+.vscode/
+.venv-cli/
