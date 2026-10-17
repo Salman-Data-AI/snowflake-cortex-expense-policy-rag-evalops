@@ -1,0 +1,25 @@
+# DCM project manifest. One target: DEV.
+# VERIFY: format copied from Snowflake-Labs/snowflake-dcm-projects (manifest_version 2), 11 Oct 2026.
+#         https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-use
+manifest_version: 2
+
+type: DCM_PROJECT
+
+default_target: DEV
+
+targets:
+  DEV:
+    # VERIFY: replace with your account identifier (ORGNAME-ACCOUNTNAME) once the trial exists.
+    account_identifier: MYORG-MYACCOUNT
+    # The project object lives in a separate admin database created by dcm/bootstrap.sql,
+    # so the project never manages the database that contains itself.
+    project_name: RAG_ADMIN.DCM.RAG_STARTER_DEV
+    project_owner: RAG_DEPLOYER
+    templating_config: DEV
+
+templating:
+  defaults:
+    wh_size: "X-SMALL"
+  configurations:
+    DEV:
+      wh_size: "X-SMALL"
