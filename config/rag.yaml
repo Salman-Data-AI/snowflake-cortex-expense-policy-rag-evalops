@@ -1,0 +1,21 @@
+# Every setting an experiment changes. Each run copies these into PIPELINE_RUNS and EVAL_RESULTS.
+# Which step to start from after a change:
+#   chunk_size, overlap          -> chunk
+#   top_k, model, prompt_version -> evaluate
+
+chunk_size: 400        # target tokens per chunk (approx. 4 characters per token)
+overlap: 50            # tokens repeated from the end of the previous chunk
+top_k: 4               # chunks retrieved per question
+model: llama3.3-70b    # AI_COMPLETE model. VERIFY it is available in your region.
+prompt_version: v1     # loads app/prompt_v1.txt
+judge_model: llama3.1-70b   # TruLens LLM judge. VERIFY in the AI Observability models list.
+
+app_name: uc_policy_rag
+settings_label: ""     # optional short tag added to app_version, e.g. "topk5"
+
+snowflake:
+  database: RAG_STARTER
+  warehouse: RAG_WH
+  role: RAG_DEPLOYER
+  stage: RAG_STARTER.RAW.DOCS_STAGE
+  search_service: RAG_STARTER.RAG.POLICY_SEARCH
