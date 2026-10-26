@@ -35,16 +35,14 @@ For each task:
 3. Ask the `reviewer` agent (`.claude/agents/reviewer.md`) to review the branch, giving it the task
    spec word for word.
 4. Fix every must-fix finding (rerun the checks); fix should-fix findings or say why not.
-5. Stop, report the changes, test results and reviewer summary, and wait for my explicit approval
-   before committing.
+5. Stop and report the changes, test results and reviewer summary. I review, commit and push myself.
 
 The report includes the reviewer's summary: its verdict and the findings, with what was fixed.
 
 ## Git
 
-Never run `git commit` or `git push` unless I approve it in the current turn. Approval for one
-commit or push doesn't carry over to the next one, or to a later turn. `.claude/settings.json` also
-has `ask` rules for both, so Claude Code prompts every time.
+I commit and push myself. Never run `git commit` or `git push`. `.claude/settings.json` has `deny`
+rules for both.
 
 Never change anything under `.claude/` (settings, hooks, agents) or `CLAUDE.md` without my approval
 in the current turn. This covers every way of changing them: the Edit and Write tools, and Bash

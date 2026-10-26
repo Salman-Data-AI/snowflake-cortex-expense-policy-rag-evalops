@@ -1,12 +1,14 @@
 {
   "permissions": {
-    "ask": [
+    "deny": [
       "Bash(git commit)",
       "Bash(git commit *)",
       "Bash(git * commit *)",
       "Bash(git push)",
       "Bash(git push *)",
-      "Bash(git * push *)",
+      "Bash(git * push *)"
+    ],
+    "ask": [
       "Edit(/.claude/**)",
       "Edit(/CLAUDE.md)"
     ]
