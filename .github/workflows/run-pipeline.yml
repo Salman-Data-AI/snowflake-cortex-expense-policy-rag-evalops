@@ -1,0 +1,128 @@
+# The only workflow that talks to Snowflake. Manual only: Actions tab -> run-pipeline -> Run workflow.
+#
+# start_from:
+#   evaluate - prompt, top_k or model changed
+#   chunk    - chunk_size or overlap changed (chunk -> search -> evaluate)
+#   parse    - new documents or a bad parse (upload -> parse -> chunk -> search -> evaluate)
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   SNOWFLAKE_ACCOUNT      e.g. MYORG-MYACCOUNT
+#   SNOWFLAKE_USER         GITHUB_RAG_SVC
+#   SNOWFLAKE_PRIVATE_KEY  contents of rsa_key.p8 (unencrypted PKCS#8)
+name: run-pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_from:
+        description: Step to start from
+        type: choice
+        options: [evaluate, chunk, parse]
+        default: evaluate
+      reparse_all:
+        description: Reparse every document (only used with start_from = parse)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: run-pipeline
+  cancel-in-progress: false
+
+env:
+  RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+  PYTHONPATH: ${{ github.workspace }}
+  # Snowflake CLI temporary connection (-x) and app/settings.py both read these.
+  # Checked against snowflake-cli 3.29 source (SUPPORTED_ENV_OVERRIDES in snow_connector.py).
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+  SNOWFLAKE_PRIVATE_KEY_FILE: ${{ github.workspace }}/.snowflake_key.p8
+  SNOWFLAKE_ROLE: RAG_DEPLOYER
+  SNOWFLAKE_WAREHOUSE: RAG_ADMIN_WH
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Snowflake CLI
+        # Separate from requirements.txt: its dependencies conflict with trulens-connectors-snowflake.
+        run: pipx install "snowflake-cli>=3.24.0"
+
+      - name: Install app dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write private key
+        run: |
+          printf '%s\n' "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > "$SNOWFLAKE_PRIVATE_KEY_FILE"
+          chmod 600 "$SNOWFLAKE_PRIVATE_KEY_FILE"
+          echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Check connection
+        run: snow connection test -x
+
+      # ---------- DCM ----------
+      - name: DCM plan
+        run: snow dcm plan --target DEV --from dcm --save-output -x   # VERIFY flags together
+
+      - name: DCM deploy
+        run: snow dcm deploy --target DEV --from dcm --alias "run-${RUN_ID}" -x
+
+      # ---------- Parse ----------
+      - name: Upload documents (unchanged files are skipped)
+        if: inputs.start_from == 'parse'
+        run: snow stage copy "documents/*.pdf" @RAG_STARTER.RAW.DOCS_STAGE --no-overwrite -x
+
+      - name: Clear parsed documents (reparse_all)
+        if: inputs.start_from == 'parse' && inputs.reparse_all
+        run: snow sql -f pipeline/reparse_all.sql -x
+
+      - name: Parse
+        if: inputs.start_from == 'parse'
+        run: snow sql -f pipeline/01_parse.sql -x
+
+      # ---------- Chunk + search ----------
+      - name: Chunk
+        if: inputs.start_from == 'parse' || inputs.start_from == 'chunk'
+        run: python pipeline/02_chunk.py
+
+      - name: Create or refresh Cortex Search
+        if: inputs.start_from == 'parse' || inputs.start_from == 'chunk'
+        run: snow sql -f pipeline/03_search.sql -x
+
+      # ---------- Evaluate (always) ----------
+      - name: Evaluate
+        run: python eval/run_eval.py
+
+      # ---------- Bookkeeping ----------
+      - name: Record run
+        if: always()
+        run: >
+          python pipeline/record_run.py
+          --start-from "${{ inputs.start_from }}"
+          --reparse-all "${{ inputs.reparse_all }}"
+          --status "${{ job.status }}"
+          --started-at "$STARTED_AT"
+
+      - name: Upload DCM plan output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dcm-plan-${{ env.RUN_ID }}
+          path: |
+            dcm/out/
+            out/
+          if-no-files-found: ignore
+
+      - name: Remove private key
+        if: always()
+        run: rm -f "$SNOWFLAKE_PRIVATE_KEY_FILE"

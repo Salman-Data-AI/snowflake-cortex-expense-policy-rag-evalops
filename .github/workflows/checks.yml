@@ -1,0 +1,37 @@
+# Runs on every push and pull request. Never connects to Snowflake, so it costs nothing.
+name: checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install check tools
+        run: pip install -r requirements-dev.txt
+
+      - name: Python lint
+        run: ruff check .
+
+      - name: Unit tests (chunker, config, questions.csv, file layout)
+        run: pytest -q
+
+      - name: SQL lint (pipeline and eval SQL)
+        # DCM definition files use DEFINE + Jinja, which sqlfluff can't parse; `snow dcm plan` checks those.
+        run: sqlfluff lint pipeline/ eval/ --dialect snowflake
+
+      - name: YAML is valid
+        run: |
+          python -c "import yaml,sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" \
+            config/rag.yaml dcm/manifest.yml .github/workflows/*.yml
