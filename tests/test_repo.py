@@ -1,6 +1,8 @@
 """Offline checks that the repository is complete and its data files are well formed."""
 
+import ast
 import csv
+import re
 from pathlib import Path
 
 import yaml
@@ -54,6 +56,26 @@ def test_config_has_experiment_settings():
 def test_prompt_has_placeholders():
     text = (ROOT / "app/prompt_v1.txt").read_text()
     assert "{context}" in text and "{question}" in text
+
+
+def _rag_label():
+    """RagApp._label, taken from app/ask.py's source: importing app.ask needs TruLens."""
+    tree = ast.parse((ROOT / "app/ask.py").read_text())
+    func = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_label")
+    func.decorator_list = []
+    namespace = {}
+    exec(compile(ast.Module(body=[func], type_ignores=[]), "app/ask.py", "exec"), namespace)
+    return namespace["_label"]
+
+
+def test_prompt_citation_example_matches_label_format():
+    text = (ROOT / "app/prompt_v1.txt").read_text()
+    match = re.search(r"for example (\[(\S+) p\.(\d+)\])", text)
+    assert match, "prompt has no citation example like [file.pdf p.N]"
+    example, file_name, page = match.groups()
+    assert _rag_label()({"file_name": file_name, "page_number": int(page)}) == example
+    with open(ROOT / "documents/manifest.csv", newline="", encoding="utf-8") as f:
+        assert file_name in {r["file_name"] for r in csv.DictReader(f)}
 
 
 def test_questions_csv_shape():
