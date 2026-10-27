@@ -18,12 +18,14 @@ Run from the repo root with the venv active (`source .venv/bin/activate`). All t
 ruff check .
 pytest -q
 sqlfluff lint pipeline/ eval/ --dialect snowflake
+python scripts/check_decisions.py
 ```
 
-These are the same checks as `.github/workflows/checks.yml`.
+These are the same checks as `.github/workflows/checks.yml`. `check_decisions.py` makes sure the
+`REVIEW.md` decision index and `docs/decisions.md` match; pytest also runs it.
 
 Hooks in `.claude/settings.json` run them automatically: after every edit of a `.py` file
-(`ruff check <file>`), and all three when Claude stops. A failing Stop check sends Claude back once
+(`ruff check <file>`), and ruff, pytest and sqlfluff when Claude stops (pytest covers the decision check). A failing Stop check sends Claude back once
 to fix it; if it still fails, Claude stops and shows the failure.
 
 ## Workflow
@@ -38,6 +40,33 @@ For each task:
 5. Stop and report the changes, test results and reviewer summary. I review, commit and push myself.
 
 The report includes the reviewer's summary: its verdict and the findings, with what was fixed.
+
+## PR and review workflow
+
+PRs get an advisory Claude review when labeled `claude-review` (`REVIEW.md`, D-008). Findings are
+tagged `[CR-n]`. To ask for a fresh full review, remove the label and add it again.
+
+- **Branches:** rebase PR branches onto `main` (`git rebase origin/main`); don't merge `main` into
+  them. After a rebase and force-push, the next Claude review is a full one.
+- **Design decisions:** when you make a non-obvious design choice, add a `D-` entry to
+  `docs/decisions.md` and its index line to `REVIEW.md` in the same PR.
+  `python scripts/check_decisions.py` (also in `checks.yml`) checks they match.
+- **Opening a PR:** fill in `.github/pull_request_template.md`, including Design decisions.
+- **When a review arrives:** start with `/review-triage <PR>`. Never fix or reply before I've
+  confirmed the triage.
+- **Fixing findings** (`/review-fix`): read the open threads with `gh`, fix, run the local checks,
+  then show me the diff and a commit message `fix(review): CR-n <summary>` (one finding per commit
+  where practical). I commit and push myself (see Git). To check my own commit messages too, enable
+  the git hook once per clone: `git config core.hooksPath .githooks`.
+- **Answering a thread** (`/review-reply`): draft the reply, show it to me, and post it only after I
+  approve, via `gh api repos/{owner}/{repo}/pulls/{n}/comments/{comment_id}/replies`. Start every reply
+  with one of `Design decision (D-00x):`, `Agreed, will fix:` or `Won't fix:`. If the rationale isn't
+  in `docs/decisions.md`, propose adding it. Don't resolve threads yourself; the re-review or I will.
+- **Enforced by `.claude/settings.json`:** `ask` for `gh api` calls that may write (any `-X`/`--method`,
+  `-f`/`-F`/`--field`/`--raw-field`/`--input`, any flag before the endpoint, replies,
+  `resolveReviewThread`; GraphQL reads and `--paginate` reads prompt too), `gh pr review`,
+  `gh pr merge`, `gh pr comment`, `gh pr edit`, `gh pr close` and `gh issue comment`; a
+  `PreToolUse` hook rejects a `git commit` that mentions `CR-` in any other format.
 
 ## Git
 

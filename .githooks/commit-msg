@@ -1,0 +1,4 @@
+#!/bin/sh
+# git commit-msg hook: a message that mentions CR- must be "fix(review): CR-n <summary>".
+# Enable once per clone:  git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_commit_msg.py" "$1"

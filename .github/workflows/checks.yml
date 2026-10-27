@@ -31,6 +31,9 @@ jobs:
         # DCM definition files use DEFINE + Jinja, which sqlfluff can't parse; `snow dcm plan` checks those.
         run: sqlfluff lint pipeline/ eval/ --dialect snowflake
 
+      - name: Decision log matches its index (REVIEW.md <-> docs/decisions.md)
+        run: python scripts/check_decisions.py
+
       - name: YAML is valid
         run: |
           python -c "import yaml,sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" \
