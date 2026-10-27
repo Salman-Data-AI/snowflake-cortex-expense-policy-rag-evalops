@@ -12,3 +12,4 @@ out/
 .vscode/
 .venv-cli/
 __pycache__/
+prompts/
