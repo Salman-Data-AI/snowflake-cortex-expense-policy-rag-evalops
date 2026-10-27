@@ -63,3 +63,4 @@ Every inline finding starts with `[CR-n] <severity>:`. IDs run across the whole 
 - D-013: Markdown tables are kept whole when chunking (once feat/chunker-keep-tables merges) → docs/decisions.md#d-013
 - D-014: DCM definitions live in dcm/sources/definitions/ → docs/decisions.md#d-014
 - D-015: dcm/bootstrap.sql is run by hand before the first DCM plan → docs/decisions.md#d-015
+- D-016: gh write ask rules are local-only, so CI can post reviews → docs/decisions.md#d-016

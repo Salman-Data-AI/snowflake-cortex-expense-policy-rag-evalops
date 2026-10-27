@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(gh api *replies*)",
+      "Bash(gh api *resolveReviewThread*)",
+      "Bash(gh api -*)",
+      "Bash(gh api * -X*)",
+      "Bash(gh api * --method*)",
+      "Bash(gh api * -f*)",
+      "Bash(gh api * -F*)",
+      "Bash(gh api * --field*)",
+      "Bash(gh api * --raw-field*)",
+      "Bash(gh api * --input*)",
+      "Bash(gh pr review)",
+      "Bash(gh pr review *)",
+      "Bash(gh pr merge)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh pr close *)",
+      "Bash(gh issue comment *)"
+    ]
+  }
+}

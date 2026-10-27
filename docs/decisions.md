@@ -136,8 +136,9 @@ tested before it's pushed.
 Decision: `.github/workflows/claude-review.yml` reviews a PR only when it has the `claude-review`
 label (full review whenever the label is added, incremental on later pushes; drafts skipped).
 Removing and re-adding the label is the way to ask for a fresh full review. Reviews are `COMMENT`
-only, the job is `continue-on-error` and not a required check, it gets no Snowflake secrets and no
-tools that edit, commit or push. Findings are fixed on the developer's machine.
+only, the job is not a required check (it fails when no review was posted, D-016, but that never
+blocks merging), it gets no Snowflake secrets and no tools that edit, commit or push. Findings are
+fixed on the developer's machine.
 Alternatives considered: Not recorded.
 Consequences: Unlabeled PRs get no AI review; the bot never fixes anything itself.
 Reviewer note: Don't flag the review as missing from unlabeled PRs, or suggest that the bot apply
@@ -230,3 +231,25 @@ Alternatives considered: Everything in DCM (not possible: the project object nee
 Consequences: Some objects live outside DCM and change only by editing and re-running the script by
 hand.
 Reviewer note: Don't flag account-level objects created outside DCM in `dcm/bootstrap.sql`.
+
+## D-016: gh write ask rules are local-only, so CI can post reviews
+Status: accepted
+Date: 2026-10-27
+Context: The claude-review action loads the project's `.claude/settings.json` (restored from
+`main`). Its `ask` rules for `gh api` writes matched the review POST, and an `ask` rule wins over the
+workflow's `--allowedTools`; with nobody to answer in CI the call was denied. Run 40573502056 on
+PR #4 ended "success" with `permission_denials_count: 1` and posted nothing.
+Decision: The `ask` rules for `gh api`, `gh pr` and `gh issue` writes live in the gitignored
+`.claude/settings.local.json`, copied from the committed `.claude/settings.local.example.json` on
+each clone (CLAUDE.md, Setup). `.claude/settings.json` keeps the commit/push `deny` rules and the
+`Edit(/.claude/**)` / `Edit(/CLAUDE.md)` asks. `claude-review.yml` no longer has
+`continue-on-error`, and its last step fails the job when no review with the `<!-- claude-review`
+marker was posted for the head commit during the run.
+Alternatives considered: Overriding the rules through the action's `settings` input (not possible:
+permission rules from all sources are combined, so an inherited `ask` can't be removed); posting
+the review from a separate workflow step instead of Claude (larger change).
+Consequences: A fresh clone has no `gh` write prompts until the example file is copied. A review
+run that posts nothing now shows as a failed job instead of a green one; it still doesn't block
+merging (D-008).
+Reviewer note: Don't flag the `gh` ask rules missing from `.claude/settings.json`, or a failed
+claude-review job as a blocking check.

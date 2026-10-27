@@ -18,4 +18,5 @@ $ARGUMENTS
 3. Show me the reply text and the exact command, then stop and wait for my approval:
    `gh api repos/{owner}/{repo}/pulls/<PR>/comments/<comment databaseId>/replies -f body="..."`
 4. Post it only after I approve in the current turn (Claude Code also asks before any `gh api` that
-   writes). Don't resolve the thread; the re-review or I will.
+   writes, with `.claude/settings.local.json` from Setup, D-016). Don't resolve the thread; the
+   re-review or I will.

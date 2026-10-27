@@ -9,7 +9,7 @@ reply, commit or resolve anything in this command.
 1. Read the latest Claude review body (`gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/reviews`; the
    one whose body has `<!-- claude-review`) and every unresolved thread whose first comment starts
    with `[CR-` (GraphQL `reviewThreads`), including all human replies. GraphQL reads need `-f`, which
-   Claude Code asks me to approve.
+   Claude Code asks me to approve (with `.claude/settings.local.json` from Setup, D-016).
 2. For each finding, read the flagged code at the PR head, `docs/decisions.md`, `REVIEW.md`, the PR
    description (`gh pr view $ARGUMENTS`), and the commits that touched those lines.
 3. Classify each finding, with one line of reasoning:
