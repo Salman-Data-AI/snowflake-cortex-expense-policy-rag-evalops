@@ -10,6 +10,12 @@ pipeline and repository layout.
   `app/ask.py` or `eval/run_eval.py`. Those run only in `run-pipeline.yml` (manual) or Phase 2.
 - Work that can be checked offline: `pipeline/chunker.py`, config, data files, tests, SQL lint.
 
+## Setup
+
+On a fresh clone, copy the local permission rules (gitignored, D-016):
+`cp .claude/settings.local.example.json .claude/settings.local.json`. If that file already exists
+(Claude Code saves "don't ask again" rules there), merge the example's `ask` list into it instead.
+
 ## Checks
 
 Run from the repo root with the venv active (`source .venv/bin/activate`). All three must pass:
@@ -62,11 +68,12 @@ tagged `[CR-n]`. To ask for a fresh full review, remove the label and add it aga
   approve, via `gh api repos/{owner}/{repo}/pulls/{n}/comments/{comment_id}/replies`. Start every reply
   with one of `Design decision (D-00x):`, `Agreed, will fix:` or `Won't fix:`. If the rationale isn't
   in `docs/decisions.md`, propose adding it. Don't resolve threads yourself; the re-review or I will.
-- **Enforced by `.claude/settings.json`:** `ask` for `gh api` calls that may write (any `-X`/`--method`,
-  `-f`/`-F`/`--field`/`--raw-field`/`--input`, any flag before the endpoint, replies,
-  `resolveReviewThread`; GraphQL reads and `--paginate` reads prompt too), `gh pr review`,
-  `gh pr merge`, `gh pr comment`, `gh pr edit`, `gh pr close` and `gh issue comment`; a
-  `PreToolUse` hook rejects a `git commit` that mentions `CR-` in any other format.
+- **Enforced by `.claude/settings.local.json`** (local only, see Setup and D-016): `ask` for `gh api`
+  calls that may write (any `-X`/`--method`, `-f`/`-F`/`--field`/`--raw-field`/`--input`, any flag
+  before the endpoint, replies, `resolveReviewThread`; GraphQL reads and `--paginate` reads prompt
+  too), `gh pr review`, `gh pr merge`, `gh pr comment`, `gh pr edit`, `gh pr close` and
+  `gh issue comment`. **By `.claude/settings.json`:** a `PreToolUse` hook rejects a `git commit`
+  that mentions `CR-` in any other format.
 
 ## Git
 
