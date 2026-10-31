@@ -5,7 +5,10 @@
 #   - after a rebase (force-push) the last reviewed commit is gone, so the next review is full
 # Draft PRs are skipped. Reviews are COMMENT only. The job fails when no review was posted for the
 # head commit (D-016), but it is not a required check, so a failure never blocks merging.
-# No Snowflake secrets; Claude gets no tools that edit files, commit or push.
+# No Snowflake secrets; Claude can't edit repo files, commit or push. It may only write files under
+# $RUNNER_TEMP/claude-review/: the review body, which it posts with one exact `-F body=@<file>`
+# command, and thread replies/resolutions, which a later workflow step posts. PR text never goes
+# through the shell, and Claude has no comment-posting or GraphQL permission (D-016).
 #
 # Setup (Settings -> Secrets and variables -> Actions):
 #   Secret   ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (one of them)
@@ -36,10 +39,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0  # the incremental diff needs history
+          # Don't leave the job token in .git/config, where Claude's Read tool or a `-F body=@<file>` could
+          # reach it (D-016). Later steps only use local git; gh uses GH_TOKEN.
+          persist-credentials: false
 
       - name: Choose review mode and build the prompt
         id: mode
@@ -51,8 +57,20 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BOT_LOGIN: ${{ vars.CLAUDE_BOT_LOGIN }}
           EVENT_ACTION: ${{ github.event.action }}
+          BODY_DIR: ${{ runner.temp }}/claude-review
+          THREADS_FILE: ${{ runner.temp }}/claude-review-threads.json
         run: |
           set -euo pipefail
+          mkdir -p "$BODY_DIR"  # Claude writes review/reply bodies here (D-016)
+          # Review threads for Claude to Read (informational only: the "Post thread replies" step
+          # re-fetches them rather than trusting this file). Not paginated: the first 100 threads and
+          # 50 comments each, enough for this repo's PRs.
+          gh api graphql -f owner="${REPO%%/*}" -f name="${REPO#*/}" -F pr="$PR" -f query='
+            query($owner: String!, $name: String!, $pr: Int!) {
+              repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
+                reviewThreads(first: 100) { nodes { id isResolved path line
+                  comments(first: 50) { nodes { databaseId author { login } body createdAt } } } } } } }' \
+            > "$THREADS_FILE"
           if [ -z "$BOT_LOGIN" ]; then
             echo "::warning::Repo variable CLAUDE_BOT_LOGIN is not set; matching prior reviews by marker only."
           fi
@@ -83,7 +101,7 @@ jobs:
           from pathlib import Path
           text = Path(f".github/claude-review/{os.environ['MODE']}.md").read_text(encoding="utf-8")
           os.environ["OWNER"], os.environ["NAME"] = os.environ["REPO"].split("/", 1)
-          for key in ("BASE_SHA", "HEAD_SHA", "NEXT_ID", "PR", "REPO", "OWNER", "NAME", "BOT_LOGIN"):
+          for key in ("BASE_SHA", "HEAD_SHA", "NEXT_ID", "PR", "REPO", "OWNER", "NAME", "BOT_LOGIN", "BODY_DIR", "THREADS_FILE"):
               text = text.replace("{{" + key + "}}", os.environ.get(key) or "(not set)")
           print(text)
           PY
@@ -110,16 +128,84 @@ jobs:
           settings: '{"disableAllHooks": true}'
           # VERIFY: https://github.com/anthropics/claude-code-action/blob/main/docs/configuration.md
           #   - model alias, and the inline-comment tool name
-          #   - `gh api graphql` can't be narrowed by prefix: it also allows mutations other than
-          #     resolveReviewThread; the prompt forbids them, nothing enforces it
-          # VERIFY (D-016): not yet run since the gh ask rules left .claude/settings.json. Check that
-          #   the first labeled run after merge posts its review with permission_denials_count 0, and
-          #   that the first incremental run's thread replies (`.../comments/<id>/replies`) aren't denied.
+          # Permissions (D-016; rule syntax per https://code.claude.com/docs/en/permissions):
+          #   - Files: `Edit` rules govern the Write tool too (a `Write(path)` rule never matches), so the
+          #     only write grant is `Edit(//<runner.temp>/claude-review/**)` (`//` = absolute path). The
+          #     deny `Edit(/**)` is anchored at the primary working directory for CLI-flag rules, i.e. the
+          #     checkout, so it doesn't cover runner.temp.
+          #   - gh: only exact commands (no `*`, which matches any text including spaces): read this PR's
+          #     reviews and review comments, and POST the review from BODY_DIR/review.md. No comment
+          #     POST, no replies and no `gh api graphql`: thread replies/resolutions go through files.
+          #   - git: diff/log/show accept `--output=<file>`, which would write any file (e.g. .git/config)
+          #     past the Edit rules, so `git *--ou*` is denied (`--ou` also catches git's abbreviations
+          #     of `--output`; `--oneline` stays allowed).
+          # VERIFY: that PR #7's review (with `$` and backticks in its body) posts with
+          #   permission_denials_count 0; that a body Write to BODY_DIR isn't denied while `Edit(/**)`
+          #   (anchored at the checkout for CLI-flag rules) still blocks repo files; that the bare `Read`
+          #   grant covers runner.temp/claude-review-threads.json; and that `git log --output=x` is denied.
           claude_args: |
             --model claude-sonnet-5-5
             --max-turns 40
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments/*),Bash(gh api graphql:*)"
-            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,Bash(git commit:*),Bash(git push:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Edit(/${{ runner.temp }}/claude-review/**),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews -X POST -f event=COMMENT -f commit_id=${{ github.event.pull_request.head.sha }} -F body=@${{ runner.temp }}/claude-review/review.md)"
+            --disallowedTools "Edit(/**),MultiEdit,NotebookEdit,Bash(git commit:*),Bash(git push:*),Bash(git *--ou*)"
+
+      # Claude only writes these files; this step posts them with the job token (D-016), and only for
+      # Claude's own threads on this PR, re-fetched here so nothing Claude wrote can widen the list.
+      #   reply-<first comment databaseId>.md  -> reply to that thread
+      #   resolve-<thread id>                  -> resolve that thread (after the replies)
+      - name: Post thread replies and resolutions
+        if: steps.mode.outputs.mode == 'incremental'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BOT_LOGIN: ${{ vars.CLAUDE_BOT_LOGIN }}
+          BODY_DIR: ${{ runner.temp }}/claude-review
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Same query as the mode step, fetched again: don't trust the file Claude could read.
+          threads=$(mktemp)
+          gh api graphql -f owner="${REPO%%/*}" -f name="${REPO#*/}" -F pr="$PR" -f query='
+            query($owner: String!, $name: String!, $pr: Int!) {
+              repository(owner: $owner, name: $name) { pullRequest(number: $pr) {
+                reviewThreads(first: 100) { nodes { id isResolved path line
+                  comments(first: 50) { nodes { databaseId author { login } body createdAt } } } } } } }' \
+            > "$threads"
+          # Ours: first comment starts with [CR- and, when BOT_LOGIN is set, is by the bot. GraphQL logins
+          # drop the "[bot]" suffix that REST shows. VERIFY: GraphQL author.login for the review bot.
+          ours='.data.repository.pullRequest.reviewThreads.nodes[]
+                | select(((.comments.nodes[0].body // "") | startswith("[CR-"))
+                         and ($bot == "" or .comments.nodes[0].author.login == ($bot | sub("\\[bot\\]$"; ""))))'
+          comment_ids=$(jq -r --arg bot "$BOT_LOGIN" "$ours | .comments.nodes[0].databaseId" "$threads")
+          thread_ids=$(jq -r --arg bot "$BOT_LOGIN" "$ours | select(.isResolved | not) | .id" "$threads")
+          for f in "$BODY_DIR"/reply-*.md; do
+            id=${f##*/reply-}; id=${id%.md}
+            if [[ "$id" =~ ^[0-9]+$ ]] && grep -qxF "$id" <<<"$comment_ids"; then
+              # One failed reply (deleted comment, unreadable file) mustn't skip the rest.
+              if gh api "repos/$REPO/pulls/$PR/comments/$id/replies" -X POST -F "body=@$f" > /dev/null; then
+                echo "Replied to comment $id"
+              else
+                echo "::warning::Reply to comment $id failed"
+              fi
+            else
+              echo "::warning::Skipped reply file $(basename "$f" | tr -cd 'A-Za-z0-9._-'): not a Claude thread on this PR"
+            fi
+          done
+          for f in "$BODY_DIR"/resolve-*; do
+            id=${f##*/resolve-}
+            if [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] && grep -qxF "$id" <<<"$thread_ids"; then
+              # VERIFY: GITHUB_TOKEN with pull-requests: write can call resolveReviewThread.
+              if gh api graphql -f id="$id" -f query='
+                mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }' > /dev/null; then
+                echo "Resolved thread $id"
+              else
+                echo "::warning::Resolving thread $id failed"
+              fi
+            else
+              echo "::warning::Skipped resolve file $(basename "$f" | tr -cd 'A-Za-z0-9._-'): not an open Claude thread on this PR"
+            fi
+          done
 
       # The action reports success even when Claude's review POST is denied (D-016), so check that a
       # review with our marker actually landed on the head commit during this run (an earlier review of
@@ -140,6 +226,11 @@ jobs:
                                and (.body | contains(\"<!-- claude-review \"))) | .id" | wc -l)
           if [ "$found" -eq 0 ]; then
             echo "::error::No review with the <!-- claude-review marker was posted for $HEAD_SHA since $STARTED."
+            # The action hides Claude's output; list the denied tool calls, if any, from its output file.
+            # tojson keeps PR-derived text on one escaped line, so it can't be read as a `::` workflow command.
+            jq -r '(if type == "array" then .[] else . end) | select(.type == "result") | .permission_denials[]?
+                   | "denied \(.tool_name): \(.tool_input.command // .tool_input | tojson | .[0:300])"' \
+              "$RUNNER_TEMP/claude-execution-output.json" || true  # VERIFY: file path and result shape
             exit 1
           fi
           echo "Found $found Claude review(s) for $HEAD_SHA since $STARTED"

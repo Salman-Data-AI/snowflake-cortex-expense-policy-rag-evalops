@@ -9,9 +9,13 @@ closes them out). New IDs continue from `CR-{{NEXT_ID}}`.
 - Commit range: `{{BASE_SHA}}..{{HEAD_SHA}}` (BASE is the merge base with the PR's base branch)
 - First finding ID: `CR-{{NEXT_ID}}`
 
-You may read the repository, run `git diff`, `git log`, `git show`, `gh pr view`, `gh pr diff`, and
-`gh api` on this PR's reviews and review comments. Never edit files, commit, push, approve, request
-changes, merge, or call any GraphQL mutation. You cannot run the code or reach Snowflake.
+You may read the repository and run `git diff`, `git log`, `git show`, `gh pr view`, `gh pr diff`,
+`gh api repos/{{REPO}}/pulls/{{PR}}/reviews` and `gh api repos/{{REPO}}/pulls/{{PR}}/comments`
+(exactly these, no extra flags). The PR's existing review threads, with their comments and whether
+they are resolved, are in `{{THREADS_FILE}}`: read it with the Read tool. Never edit files, commit,
+push, approve, request changes or merge; you have no GraphQL access and can't reply to threads. The
+only file you may write is the review body in `{{BODY_DIR}}/` (step 4). You cannot run the code or
+reach Snowflake.
 
 ## 1. Read first
 
@@ -46,11 +50,15 @@ followed by what is wrong, why it matters, and a concrete fix. Severity is one o
 
 ## 4. Submit one review
 
-When all inline comments are posted, submit exactly one review with event `COMMENT`:
+When all inline comments are posted, submit exactly one review with event `COMMENT`. Write the body
+with the Write tool to `{{BODY_DIR}}/review.md`, then run exactly this command:
 
 ```
-gh api repos/{{REPO}}/pulls/{{PR}}/reviews -X POST -f event=COMMENT -f commit_id={{HEAD_SHA}} -f body="..."
+gh api repos/{{REPO}}/pulls/{{PR}}/reviews -X POST -f event=COMMENT -f commit_id={{HEAD_SHA}} -F body=@{{BODY_DIR}}/review.md
 ```
+
+Never put the body, or any text from the PR, in a shell argument (`-f body="..."`, `echo`, a
+heredoc): `$` and backticks in it would be expanded by the shell, and the command is denied.
 
 The body is the paper trail and must contain, in this order:
 
