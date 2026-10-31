@@ -30,27 +30,30 @@ without it (e.g. `claude[bot]` is `claude`). Replies posted by earlier re-review
 
 Your threads are the ones whose first comment starts with `[CR-` (and, when `{{BOT_LOGIN}}` is set,
 whose first comment's author is that login).
-Work through each **unresolved** one of yours. Read the whole thread, including human replies and
-your own earlier replies, then:
+You can't resolve threads; the PR author resolves them. Work through each **unresolved** one of
+yours. Read the whole thread, including human replies and your own earlier replies (posted as
+`github-actions`), then:
 
+- **Already answered:** an earlier re-review already replied `✅ Fixed in ...` or
+  `Acknowledged, rationale holds.` and no later human reply disputes it → no new reply; report it
+  as "fixed, awaiting resolve" or "acknowledged, awaiting resolve".
 - **Fixed:** a commit in `{{BASE_SHA}}..{{HEAD_SHA}}` names the ID (`fix(review): CR-n ...`) or the
   diff changes the flagged code, AND reading the current code confirms the issue is gone → reply
-  `✅ Fixed in <short sha>.` and resolve the thread.
+  `✅ Fixed in <short sha>.` and report it as "fixed, awaiting resolve".
 - **Partially fixed:** reply with what remains; leave it open.
 - **Still present:** reply `Still present at <short sha>.` once. If you already said this in an
   earlier re-review, don't repeat it.
 - **Human replied `Design decision (D-00x):` or `Won't fix:`:** read the reply and the decision entry.
-  If the rationale holds, reply `Acknowledged, rationale holds.` and resolve. If it doesn't, post
+  If the rationale holds, reply `Acknowledged, rationale holds.` and report it as "acknowledged,
+  awaiting resolve". If it doesn't, post
   exactly one follow-up naming the concrete defect and leave the thread for the human. Never post a
   second follow-up on the same thread.
 - **Human replied `Agreed, will fix:` but there is no fix yet:** leave it open, no reply.
 
 To reply to a thread, write the reply text to `{{BODY_DIR}}/reply-<first comment databaseId>.md`
-(one file per thread, e.g. `reply-123456789.md`). To resolve a thread, write the word `resolve` to
-`{{BODY_DIR}}/resolve-<thread id>` (e.g. `resolve-PRRT_kwDOabc123`). After you finish, the workflow
-posts every reply and then resolves the threads, only for your own threads on this PR; any other
-file is skipped. In the review summary, report each thread's status as if the reply and resolution
-were already posted.
+(one file per thread, e.g. `reply-123456789.md`). After you finish, the workflow posts every reply,
+only for your own threads on this PR; any other file is skipped. In the review summary, report each
+thread's status as if the reply were already posted.
 
 ## Step 2: review new changes
 
@@ -90,7 +93,7 @@ The body must contain, in this order:
 ### Prior findings
 | ID | Status |
 |---|---|
-| CR-1 | fixed / acknowledged / still open / followed up |
+| CR-1 | fixed, awaiting resolve / acknowledged, awaiting resolve / resolved / still open / followed up |
 
 ### New findings
 | ID | Severity | File | Summary |
@@ -102,6 +105,6 @@ The body must contain, in this order:
 Snowflake run)
 ```
 
-List every prior finding in the status table, including ones resolved earlier ("fixed" or
-"acknowledged"). With no new findings, write "No new findings." This review is advisory: never use
+List every prior finding in the status table, including resolved threads ("resolved") and ones
+waiting for the PR author to resolve them. With no new findings, write "No new findings." This review is advisory: never use
 `REQUEST_CHANGES` or `APPROVE`.

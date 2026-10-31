@@ -7,8 +7,9 @@
 # head commit (D-016), but it is not a required check, so a failure never blocks merging.
 # No Snowflake secrets; Claude can't edit repo files, commit or push. It may only write files under
 # $RUNNER_TEMP/claude-review/: the review body, which it posts with one exact `-F body=@<file>`
-# command, and thread replies/resolutions, which a later workflow step posts. PR text never goes
-# through the shell, and Claude has no comment-posting or GraphQL permission (D-016).
+# command, and thread replies, which a later workflow step posts. PR text never goes
+# through the shell. Claude has no `gh` comment, reply or GraphQL permission; it comments only via the
+# inline-comment MCP tool, whose body is a tool parameter, not shell text (D-016).
 #
 # Setup (Settings -> Secrets and variables -> Actions):
 #   Secret   ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (one of them)
@@ -116,6 +117,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Claude review (${{ steps.mode.outputs.mode }})
+        id: claude
         # VERIFY: https://github.com/anthropics/claude-code-action (inputs; giving both auth inputs with
         #         one of them empty is not documented: set only one of the two secrets)
         uses: anthropics/claude-code-action@v1
@@ -135,25 +137,26 @@ jobs:
           #     checkout, so it doesn't cover runner.temp.
           #   - gh: only exact commands (no `*`, which matches any text including spaces): read this PR's
           #     reviews and review comments, and POST the review from BODY_DIR/review.md. No comment
-          #     POST, no replies and no `gh api graphql`: thread replies/resolutions go through files.
+          #     POST, no replies and no `gh api graphql`: thread replies go through files.
           #   - git: diff/log/show accept `--output=<file>`, which would write any file (e.g. .git/config)
           #     past the Edit rules, so `git *--ou*` is denied (`--ou` also catches git's abbreviations
           #     of `--output`; `--oneline` stays allowed).
           # VERIFY: that PR #7's review (with `$` and backticks in its body) posts with
           #   permission_denials_count 0; that a body Write to BODY_DIR isn't denied while `Edit(/**)`
           #   (anchored at the checkout for CLI-flag rules) still blocks repo files; that the bare `Read`
-          #   grant covers runner.temp/claude-review-threads.json; and that `git log --output=x` is denied.
+          #   grant covers runner.temp/claude-review-threads.json; that `git log --output=x` is denied; and that a
+          #   redirect such as `git diff > x` isn't allowed by the `git diff:*` rule (it would write any file).
           claude_args: |
             --model claude-sonnet-5-5
             --max-turns 40
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Edit(/${{ runner.temp }}/claude-review/**),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews -X POST -f event=COMMENT -f commit_id=${{ github.event.pull_request.head.sha }} -F body=@${{ runner.temp }}/claude-review/review.md)"
             --disallowedTools "Edit(/**),MultiEdit,NotebookEdit,Bash(git commit:*),Bash(git push:*),Bash(git *--ou*)"
 
-      # Claude only writes these files; this step posts them with the job token (D-016), and only for
+      # Claude only writes reply files; this step posts them with the job token (D-016), and only for
       # Claude's own threads on this PR, re-fetched here so nothing Claude wrote can widen the list.
       #   reply-<first comment databaseId>.md  -> reply to that thread
-      #   resolve-<thread id>                  -> resolve that thread (after the replies)
-      - name: Post thread replies and resolutions
+      # Threads aren't resolved here: the job token can't call resolveReviewThread (D-016).
+      - name: Post thread replies
         if: steps.mode.outputs.mode == 'incremental'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -173,12 +176,11 @@ jobs:
                   comments(first: 50) { nodes { databaseId author { login } body createdAt } } } } } } }' \
             > "$threads"
           # Ours: first comment starts with [CR- and, when BOT_LOGIN is set, is by the bot. GraphQL logins
-          # drop the "[bot]" suffix that REST shows. VERIFY: GraphQL author.login for the review bot.
+          # drop the "[bot]" suffix that REST shows (`claude[bot]` is `claude`, seen on PR #7).
           ours='.data.repository.pullRequest.reviewThreads.nodes[]
                 | select(((.comments.nodes[0].body // "") | startswith("[CR-"))
                          and ($bot == "" or .comments.nodes[0].author.login == ($bot | sub("\\[bot\\]$"; ""))))'
           comment_ids=$(jq -r --arg bot "$BOT_LOGIN" "$ours | .comments.nodes[0].databaseId" "$threads")
-          thread_ids=$(jq -r --arg bot "$BOT_LOGIN" "$ours | select(.isResolved | not) | .id" "$threads")
           for f in "$BODY_DIR"/reply-*.md; do
             id=${f##*/reply-}; id=${id%.md}
             if [[ "$id" =~ ^[0-9]+$ ]] && grep -qxF "$id" <<<"$comment_ids"; then
@@ -190,20 +192,6 @@ jobs:
               fi
             else
               echo "::warning::Skipped reply file $(basename "$f" | tr -cd 'A-Za-z0-9._-'): not a Claude thread on this PR"
-            fi
-          done
-          for f in "$BODY_DIR"/resolve-*; do
-            id=${f##*/resolve-}
-            if [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] && grep -qxF "$id" <<<"$thread_ids"; then
-              # VERIFY: GITHUB_TOKEN with pull-requests: write can call resolveReviewThread.
-              if gh api graphql -f id="$id" -f query='
-                mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }' > /dev/null; then
-                echo "Resolved thread $id"
-              else
-                echo "::warning::Resolving thread $id failed"
-              fi
-            else
-              echo "::warning::Skipped resolve file $(basename "$f" | tr -cd 'A-Za-z0-9._-'): not an open Claude thread on this PR"
             fi
           done
 
@@ -218,6 +206,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BOT_LOGIN: ${{ vars.CLAUDE_BOT_LOGIN }}
           STARTED: ${{ steps.mode.outputs.started }}
+          # Documented action output (action.yml `execution_file`); empty when Claude didn't run.
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
         run: |
           set -euo pipefail
           found=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
@@ -226,11 +216,16 @@ jobs:
                                and (.body | contains(\"<!-- claude-review \"))) | .id" | wc -l)
           if [ "$found" -eq 0 ]; then
             echo "::error::No review with the <!-- claude-review marker was posted for $HEAD_SHA since $STARTED."
-            # The action hides Claude's output; list the denied tool calls, if any, from its output file.
-            # tojson keeps PR-derived text on one escaped line, so it can't be read as a `::` workflow command.
-            jq -r '(if type == "array" then .[] else . end) | select(.type == "result") | .permission_denials[]?
-                   | "denied \(.tool_name): \(.tool_input.command // .tool_input | tojson | .[0:300])"' \
-              "$RUNNER_TEMP/claude-execution-output.json" || true  # VERIFY: file path and result shape
+            if [ -z "$EXEC_FILE" ] || [ ! -f "$EXEC_FILE" ]; then
+              # E.g. the action skips when this PR changes the workflow file, which must match main (D-016).
+              echo "::error::Claude did not run (no execution file). The action may have skipped, e.g. because this PR changes the workflow file, which must match main."
+            else
+              # The action hides Claude's output; list the denied tool calls, if any, from its output file.
+              # tojson keeps PR-derived text on one escaped line, so it can't be read as a `::` workflow command.
+              jq -r '(if type == "array" then .[] else . end) | select(.type == "result") | .permission_denials[]?
+                     | "denied \(.tool_name): \(.tool_input.command // .tool_input | tojson | .[0:300])"' \
+                "$EXEC_FILE" || true  # VERIFY: result shape
+            fi
             exit 1
           fi
           echo "Found $found Claude review(s) for $HEAD_SHA since $STARTED"
