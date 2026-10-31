@@ -4,7 +4,7 @@ last reviewed commit no longer exists after a rebase.
 
 Earlier Claude findings may already exist on this PR. Don't repost a finding that still has an
 unresolved `[CR-n]` thread on the same problem; leave those threads alone (the incremental re-review
-closes them out). New IDs continue from `CR-{{NEXT_ID}}`.
+replies to them). New IDs continue from `CR-{{NEXT_ID}}`.
 
 - Commit range: `{{BASE_SHA}}..{{HEAD_SHA}}` (BASE is the merge base with the PR's base branch)
 - First finding ID: `CR-{{NEXT_ID}}`

@@ -67,7 +67,8 @@ tagged `[CR-n]`. To ask for a fresh full review, remove the label and add it aga
 - **Answering a thread** (`/review-reply`): draft the reply, show it to me, and post it only after I
   approve, via `gh api repos/{owner}/{repo}/pulls/{n}/comments/{comment_id}/replies`. Start every reply
   with one of `Design decision (D-00x):`, `Agreed, will fix:` or `Won't fix:`. If the rationale isn't
-  in `docs/decisions.md`, propose adding it. Don't resolve threads yourself; the re-review or I will.
+  in `docs/decisions.md`, propose adding it. Don't resolve threads yourself; I resolve them (the
+  re-review can't, D-016).
 - **Enforced by `.claude/settings.local.json`** (local only, see Setup and D-016): `ask` for `gh api`
   calls that may write (any `-X`/`--method`, `-f`/`-F`/`--field`/`--raw-field`/`--input`, any flag
   before the endpoint, replies, `resolveReviewThread`; GraphQL reads and `--paginate` reads prompt

@@ -22,4 +22,4 @@ say so.
    `fix(review): CR-n <what changed>` (one finding per commit where practical; several IDs as
    `fix(review): CR-3, CR-5 <summary>`). I commit and push myself.
 
-Don't reply to or resolve any thread; the re-review or I will.
+Don't reply to or resolve any thread; I resolve them (the re-review can't, D-016).
