@@ -5,23 +5,28 @@ review covered the PR up to `{{BASE_SHA}}`; review only what changed since.
 - Next finding ID: `CR-{{NEXT_ID}}`
 - Review bot login: `{{BOT_LOGIN}}`
 
-You may read the repository, run `git diff`, `git log`, `git show`, `gh pr view`, `gh pr diff`,
-`gh api` on this PR's reviews and review comments, and `gh api graphql` for the `reviewThreads` query
-and the `resolveReviewThread` mutation only. Never edit files, commit, push, approve, request
-changes, merge, or call any other mutation. You cannot run the code or reach Snowflake.
+You may read the repository and run `git diff`, `git log`, `git show`, `gh pr view`, `gh pr diff`,
+`gh api repos/{{REPO}}/pulls/{{PR}}/reviews` and `gh api repos/{{REPO}}/pulls/{{PR}}/comments`
+(exactly these, no extra flags). Never edit files, commit, push, approve, request changes or merge.
+You have no GraphQL access and can't post replies yourself: you write files in `{{BODY_DIR}}/` with
+the Write tool, and a workflow step posts them after you finish (Step 1). You cannot run the code or
+reach Snowflake.
+
+Never put a reply or review body, or any text from the PR, in a shell argument (`-f body="..."`,
+`echo`, a heredoc): `$` and backticks in it would be expanded by the shell, and the command is
+denied.
 
 Read `REVIEW.md`, `docs/decisions.md`, `CLAUDE.md` and the PR description
 (`gh pr view {{PR}} --json title,body`) first.
 
 ## Step 1: close out prior findings
 
-List the review threads:
-
-```
-gh api graphql -f query='query { repository(owner: "{{OWNER}}", name: "{{NAME}}") { pullRequest(number: {{PR}}) {
-  reviewThreads(first: 100) { nodes { id isResolved path line
-    comments(first: 50) { nodes { databaseId author { login } body createdAt } } } } } } }'
-```
+The review threads were fetched before you started. Read `{{THREADS_FILE}}` with the Read tool: it
+is the GraphQL `reviewThreads` result (`data.repository.pullRequest.reviewThreads.nodes`, each with
+`id`, `isResolved`, `path`, `line` and `comments.nodes` with `databaseId`, `author.login`, `body`,
+`createdAt`). Logins in this file have no `[bot]` suffix: the review bot `{{BOT_LOGIN}}` appears
+without it (e.g. `claude[bot]` is `claude`). Replies posted by earlier re-reviews show
+`github-actions` as the author.
 
 Your threads are the ones whose first comment starts with `[CR-` (and, when `{{BOT_LOGIN}}` is set,
 whose first comment's author is that login).
@@ -40,17 +45,12 @@ your own earlier replies, then:
   second follow-up on the same thread.
 - **Human replied `Agreed, will fix:` but there is no fix yet:** leave it open, no reply.
 
-Reply to a thread with:
-
-```
-gh api repos/{{REPO}}/pulls/{{PR}}/comments/<first comment databaseId>/replies -X POST -f body="..."
-```
-
-Resolve it with:
-
-```
-gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread id>"}) { thread { isResolved } } }'
-```
+To reply to a thread, write the reply text to `{{BODY_DIR}}/reply-<first comment databaseId>.md`
+(one file per thread, e.g. `reply-123456789.md`). To resolve a thread, write the word `resolve` to
+`{{BODY_DIR}}/resolve-<thread id>` (e.g. `resolve-PRRT_kwDOabc123`). After you finish, the workflow
+posts every reply and then resolves the threads, only for your own threads on this PR; any other
+file is skipped. In the review summary, report each thread's status as if the reply and resolution
+were already posted.
 
 ## Step 2: review new changes
 
@@ -74,10 +74,11 @@ passing `confirmed: true`, numbered from `CR-{{NEXT_ID}}`, each starting
 
 ## Step 3: submit one review
 
-Submit exactly one review with event `COMMENT`:
+Submit exactly one review with event `COMMENT`. Write the body to `{{BODY_DIR}}/review.md`, then
+run exactly this command:
 
 ```
-gh api repos/{{REPO}}/pulls/{{PR}}/reviews -X POST -f event=COMMENT -f commit_id={{HEAD_SHA}} -f body="..."
+gh api repos/{{REPO}}/pulls/{{PR}}/reviews -X POST -f event=COMMENT -f commit_id={{HEAD_SHA}} -F body=@{{BODY_DIR}}/review.md
 ```
 
 The body must contain, in this order:

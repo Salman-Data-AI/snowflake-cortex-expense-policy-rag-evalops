@@ -251,5 +251,45 @@ the review from a separate workflow step instead of Claude (larger change).
 Consequences: A fresh clone has no `gh` write prompts until the example file is copied. A review
 run that posts nothing now shows as a failed job instead of a green one; it still doesn't block
 merging (D-008).
+Update 2026-10-31 (bodies posted from files): run 41184301241 on PR #7 posted nothing, with
+`permission_denials_count: 5`. The prompts had Claude post with `-f body="..."`, so the review body
+(PR content full of `$75`, `$ 31.00` and backticks) went through the shell inline. Shell expansion of
+`$` and backticks from PR content is both a cause of the denials and an injection risk: a PR could
+plant a command substitution that runs when the review is posted. Claude now writes the review
+body with the Write tool to `$RUNNER_TEMP/claude-review/review.md` and posts it with
+`gh api ... -F body=@<file>`; the prompts forbid putting PR text in a shell argument. File writes are
+allowed only in that directory and denied on the checkout (`Edit(/**)`), and the review POST is also
+allowed as an exact command. The `reviews:*` prefix rule was removed: it also allowed
+`-F body=@<any file>` or an inline body, so only the plain GET and the POST from
+`$RUNNER_TEMP/claude-review/review.md` are allowed, and checkout runs with
+`persist-credentials: false` so the job token isn't left in `.git/config`. On failure the check
+step prints the denied tool calls from the action's output file, since the action hides Claude's
+output.
+Thread replies and resolutions go through the workflow, not Claude. Claude Code's permission
+docs (https://code.claude.com/docs/en/permissions) allow a `*` anywhere in a Bash rule, but it
+"matches any text, including spaces", so a rule like `.../comments/*/replies -X POST
+-F body=@<dir>/reply-*.md` would still match extra arguments (an inline `-f body=...`, another
+`-F x=@<file>`) or `reply-../<path>.md`; it can't limit posting to files in the body directory. The
+same goes for `gh api graphql:*`, which allows any mutation, including ones that post comments.
+So Claude has no comment, reply or GraphQL permission. The mode step fetches the review threads to
+`$RUNNER_TEMP/claude-review-threads.json` for Claude to Read.
+Claude writes `reply-<first comment databaseId>.md` and `resolve-<thread id>` files, and the "Post
+thread replies and resolutions" step (incremental mode only) posts the replies with
+`-F body=@<file>`, then resolves the threads. It re-fetches the threads itself rather than trusting
+the file, acts only on IDs of Claude's own threads, skips any other file, and keeps going if one call
+fails. `git diff`/`log`/`show` accept `--output=<file>`, which would let Claude write any file (the
+threads file, or `.git/config` to make a later git command run arbitrary code) past the Edit
+rules, so `Bash(git *--ou*)` is denied. Replies are therefore authored by `github-actions[bot]`, not
+the review bot. New findings still use the action's inline-comment MCP tool, which takes the body as
+a tool parameter, not through the shell. Per the same docs, `Write(path)` rules never match (Edit
+rules govern the Write tool), so the only write grant is `Edit(//<runner.temp>/claude-review/**)`,
+and `/**` in a CLI-flag rule is anchored at the primary working directory (the checkout).
+Accepted risk: the action's own git setup ("Configuring git authentication") may still write a token
+to `.git/config`, where Claude's Read tool could reach it despite `persist-credentials: false`. This
+is accepted because only labelled PRs are reviewed, only repo writers can add the label, and the
+token expires when the job ends.
 Reviewer note: Don't flag the `gh` ask rules missing from `.claude/settings.json`, or a failed
-claude-review job as a blocking check.
+claude-review job as a blocking check. Do flag any review prompt that puts a body or PR text in a
+shell argument, an Edit/Write allow rule outside `$RUNNER_TEMP/claude-review/`, or any Claude
+permission that posts comments or replies, or calls `gh api graphql`, or a `*` in a `gh api` allow
+rule.
