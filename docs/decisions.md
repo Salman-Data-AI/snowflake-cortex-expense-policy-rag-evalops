@@ -289,7 +289,10 @@ to `.git/config`, where Claude's Read tool could reach it despite `persist-crede
 is accepted because only labelled PRs are reviewed, only repo writers can add the label, and the
 token expires when the job ends.
 Reviewer note: Don't flag the `gh` ask rules missing from `.claude/settings.json`, or a failed
-claude-review job as a blocking check.
+claude-review job as a blocking check. Do flag any review prompt that puts a body or PR text in a
+shell argument, an Edit/Write allow rule outside `$RUNNER_TEMP/claude-review/`, or any Claude
+permission that posts comments or replies, or calls `gh api graphql`, or a `*` in a `gh api` allow
+rule.
 
 ## D-017: Gold-set pages and key facts are checked against pypdf text
 Status: accepted
