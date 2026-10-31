@@ -64,3 +64,4 @@ Every inline finding starts with `[CR-n] <severity>:`. IDs run across the whole 
 - D-014: DCM definitions live in dcm/sources/definitions/ → docs/decisions.md#d-014
 - D-015: dcm/bootstrap.sql is run by hand before the first DCM plan → docs/decisions.md#d-015
 - D-016: gh write ask rules are local-only, so CI can post reviews → docs/decisions.md#d-016
+- D-017: Gold-set pages and key facts are checked against pypdf text → docs/decisions.md#d-017

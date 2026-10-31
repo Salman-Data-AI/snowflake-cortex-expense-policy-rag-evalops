@@ -306,3 +306,25 @@ permission (other than the inline-comment MCP tool) that posts comments or repli
 `gh api graphql`, or a `*` in a `gh api` allow
 rule, or `contents: write` on claude-review.yml, or any attempt to resolve threads with the job
 token.
+
+## D-017: Gold-set pages and key facts are checked against pypdf text
+Status: accepted
+Date: 2026-10-31
+Context: The expected answers in `eval/questions.csv` were written by hand from the PDFs, and
+nothing checked that the PDFs actually say them.
+Decision: `eval/questions.csv` stays the single source of truth and gains `expected_pages` (1-based
+physical page index in the PDF, not the printed page number) and `key_facts`, both `|`-separated
+and both empty for `NONE` rows. Each fact is copied as pypdf's `extract_text()` renders it (e.g.
+`$ 31.00`, `76.0 cents per mile`), and `tests/test_repo.py` asserts every fact appears on at least
+one expected page, after collapsing whitespace and ignoring case, with no other fuzzy matching. Key
+facts are for page verification only: they must not be used to grade model answers without
+normalisation, because a correct answer saying "$31" or "76 cents" would not contain them.
+Alternatives considered: A separate JSON gold file (two sources of truth); printed page numbers
+(not guaranteed to match the physical index that pypdf and the test use); fuzzy matching (hides
+extraction drift).
+Consequences: `pypdf` is a dev dependency, pinned to `==6.21.4` in `requirements-dev.txt` because
+the facts were copied from that version's rendering. Facts avoid spots where pypdf breaks words across lines.
+A pypdf upgrade that changes text rendering can fail the test; re-copy the facts from the new
+rendering rather than loosening the match.
+Reviewer note: Don't flag key_facts that differ from the expected_answer's wording (e.g. `$ 31.00`
+vs `$31`) or the absence of fuzzy matching. Do flag key_facts used as an answer-grading metric.

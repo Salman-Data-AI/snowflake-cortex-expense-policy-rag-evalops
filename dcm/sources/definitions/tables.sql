@@ -32,7 +32,9 @@ define table RAG_STARTER.EVAL.EVAL_QUESTIONS (
     QUESTION           varchar,
     EXPECTED_ANSWER    varchar,
     EXPECTED_DOCUMENT  varchar comment 'File name, or NONE when the answer is not in the documents',
-    CATEGORY           varchar
+    CATEGORY           varchar,
+    EXPECTED_PAGES     varchar comment '1-based physical page index in the PDF, |-separated; empty for NONE',
+    KEY_FACTS          varchar comment 'Facts as pypdf renders them on those pages, |-separated (D-017)'
 );
 
 -- One row per press of the pipeline button.
