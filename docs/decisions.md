@@ -265,7 +265,7 @@ allowed as an exact command. The `reviews:*` prefix rule was removed: it also al
 `persist-credentials: false` so the job token isn't left in `.git/config`. On failure the check
 step prints the denied tool calls from the action's output file, since the action hides Claude's
 output.
-Thread replies and resolutions go through the workflow, not Claude. Claude Code's permission
+Thread replies go through the workflow, not Claude. Claude Code's permission
 docs (https://code.claude.com/docs/en/permissions) allow a `*` anywhere in a Bash rule, but it
 "matches any text, including spaces", so a rule like `.../comments/*/replies -X POST
 -F body=@<dir>/reply-*.md` would still match extra arguments (an inline `-f body=...`, another
@@ -274,9 +274,8 @@ same goes for `gh api graphql:*`, which allows any mutation, including ones that
 So Claude has no `gh` comment, reply or GraphQL permission; it comments only through the action's
 inline-comment MCP tool (below). The mode step fetches the review threads to
 `$RUNNER_TEMP/claude-review-threads.json` for Claude to Read.
-Claude writes `reply-<first comment databaseId>.md` and `resolve-<thread id>` files, and the "Post
-thread replies and resolutions" step (incremental mode only) posts the replies with
-`-F body=@<file>`, then resolves the threads. It re-fetches the threads itself rather than trusting
+Claude writes `reply-<first comment databaseId>.md` files, and the "Post thread replies" step
+(incremental mode only) posts them with `-F body=@<file>`. It re-fetches the threads itself rather than trusting
 the file, acts only on IDs of Claude's own threads, skips any other file, and keeps going if one call
 fails. `git diff`/`log`/`show` accept `--output=<file>`, which would let Claude write any file (the
 threads file, or `.git/config` to make a later git command run arbitrary code) past the Edit
@@ -290,6 +289,11 @@ for the app token only when the workflow file matches `main`, and otherwise skip
 Claude (run 41206916768 on PR #8). Such PRs need a local reviewer-agent run before merge. The check
 step reads the execution file from the action's documented `execution_file` output and, when it is
 missing, fails with "Claude did not run" instead of a jq error.
+Threads aren't resolved automatically: the job token can't call `resolveReviewThread` ("Resource
+not accessible by integration", run 41212307709 on PR #7), so the PR author resolves them, and the
+re-review reports them as "fixed, awaiting resolve" without replying again. `contents: write` was
+rejected because the action passes the job token into Claude's environment, so a token that can
+push would be readable by Claude.
 Accepted risk: Claude can read files on the runner that contain the job token (e.g. `.git/config`,
 which the action's own git setup may still write despite `persist-credentials: false`, and
 `/proc/self/environ`). Accepted because only labelled PRs are reviewed, only repo writers can add
@@ -300,4 +304,5 @@ claude-review job as a blocking check. Do flag any review prompt that puts a bod
 shell argument, an Edit/Write allow rule outside `$RUNNER_TEMP/claude-review/`, or any Claude
 permission (other than the inline-comment MCP tool) that posts comments or replies, or calls
 `gh api graphql`, or a `*` in a `gh api` allow
-rule.
+rule, or `contents: write` on claude-review.yml, or any attempt to resolve threads with the job
+token.
