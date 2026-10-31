@@ -3,9 +3,11 @@
 import ast
 import csv
 import re
+from functools import cache
 from pathlib import Path
 
 import yaml
+from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -83,6 +85,7 @@ def test_questions_csv_shape():
         rows = list(csv.DictReader(f))
     assert set(rows[0]) == {
         "question_id", "question", "expected_answer", "expected_document", "category",
+        "expected_pages", "key_facts",
     }
     assert 10 <= len(rows) <= 15
     ids = [r["question_id"] for r in rows]
@@ -99,3 +102,60 @@ def test_expected_documents_are_in_manifest():
     with open(ROOT / "eval/questions.csv", newline="", encoding="utf-8") as f:
         expected = {r["expected_document"] for r in csv.DictReader(f)} - {"NONE"}
     assert expected <= files, f"not in manifest: {expected - files}"
+
+
+def _gold_rows():
+    with open(ROOT / "eval/questions.csv", newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+@cache
+def _pdf_pages(file_name: str) -> list[str]:
+    """Text of each page of documents/<file_name>, whitespace collapsed and lower-cased."""
+    reader = PdfReader(ROOT / "documents" / file_name)
+    return [_normalise(page.extract_text() or "") for page in reader.pages]
+
+
+def _normalise(text: str) -> str:
+    return " ".join(text.split()).lower()
+
+
+def _split(value: str) -> list[str]:
+    return value.split("|") if value else []
+
+
+def test_gold_pages_and_facts_are_well_formed():
+    with open(ROOT / "documents/manifest.csv", newline="", encoding="utf-8") as f:
+        manifest = {r["file_name"] for r in csv.DictReader(f)}
+    for r in _gold_rows():
+        qid, doc = r["question_id"], r["expected_document"]
+        pages, facts = _split(r["expected_pages"]), _split(r["key_facts"])
+        assert bool(pages) == bool(facts), f"{qid}: set both expected_pages and key_facts, or neither"
+        if doc == "NONE":
+            assert not pages, f"{qid}: unanswerable row has expected_pages/key_facts"
+            continue
+        assert doc in manifest, f"{qid}: {doc} not in documents/manifest.csv"
+        assert (ROOT / "documents" / doc).is_file(), f"{qid}: documents/{doc} does not exist"
+        assert all(fact.strip() for fact in facts), f"{qid}: empty key_fact in {r['key_facts']!r}"
+        n_pages = len(_pdf_pages(doc))
+        for page in pages:
+            assert page.isdecimal() and 1 <= int(page) <= n_pages, (
+                f"{qid}: page {page!r} not in 1..{n_pages} of {doc}"
+            )
+
+
+def test_gold_facts_on_expected_pages():
+    """Each key_fact appears on at least one expected page (D-017: pypdf text, whitespace/case only)."""
+    failures = []
+    for r in _gold_rows():
+        if not r["key_facts"]:
+            continue
+        qid, doc = r["question_id"], r["expected_document"]
+        text = _pdf_pages(doc)
+        pages = _split(r["expected_pages"])
+        # Malformed or out-of-range pages are reported by test_gold_pages_and_facts_are_well_formed.
+        on_pages = [text[int(p) - 1] for p in pages if p.isdecimal() and 1 <= int(p) <= len(text)]
+        for fact in _split(r["key_facts"]):
+            if not any(_normalise(fact) in page for page in on_pages):
+                failures.append(f"{qid}: {fact!r} not on pages {pages} of {doc}")
+    assert not failures, "\n".join(failures)

@@ -34,6 +34,8 @@ def load_questions(session) -> pd.DataFrame:
     df = pd.read_csv(REPO_ROOT / "eval" / "questions.csv", dtype=str).fillna("")
     df.columns = [c.upper() for c in df.columns]
     session.sql(f"DELETE FROM {QUESTIONS_TABLE}").collect()
+    # VERIFY: write_pandas maps the CSV columns (incl. EXPECTED_PAGES, KEY_FACTS) to EVAL_QUESTIONS
+    # by name, and empty strings (NONE rows) load as '' rather than failing.
     session.write_pandas(
         df, table_name="EVAL_QUESTIONS", database="RAG_STARTER", schema="EVAL",
         auto_create_table=False, overwrite=False,
