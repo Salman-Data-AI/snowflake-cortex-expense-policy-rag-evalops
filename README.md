@@ -40,12 +40,13 @@ dcm/                      Snowflake objects (DCM project)
   manifest.yml            one target: DEV
   bootstrap.sql           one-time setup by hand: role, admin db, service user, resource monitor
   sources/definitions/    infra.sql (db, schemas, warehouse, stage), tables.sql (5 tables)
-pipeline/                 01_parse.sql, 02_chunk.py, chunker.py, 03_search.sql,
+pipeline/                 01_parse.sql, 02_chunk.py, chunker.py, parsed_doc.py (page_texts), 03_search.sql,
                           reparse_all.sql, record_run.py, end_session.sql
 config/rag.yaml           chunk_size, overlap, top_k, model, prompt_version, judge_model
-app/                      ask.py (RagApp), prompt_v1.txt, settings.py
+app/                      ask.py (RagApp: Snowflake clients + TruLens spans), rag_core.py (RagCore: the
+                          RAG logic, no TruLens/Snowflake), citations.py, prompt_v1.txt, settings.py
 eval/                     questions.csv, run_eval.py, compare.sql, harbor/ (Phase 4)
-tests/                    offline unit tests (chunker, config, questions, file layout)
+tests/                    offline unit tests (chunker, page_texts, ask() with fakes, config, questions, file layout)
 .github/workflows/        checks.yml (every push, no Snowflake), run-pipeline.yml (manual)
 ```
 

@@ -328,3 +328,28 @@ A pypdf upgrade that changes text rendering can fail the test; re-copy the facts
 rendering rather than loosening the match.
 Reviewer note: Don't flag key_facts that differ from the expected_answer's wording (e.g. `$ 31.00`
 vs `$31`) or the absence of fuzzy matching. Do flag key_facts used as an answer-grading metric.
+
+## D-018: RAG logic lives in a TruLens-free base class; RagApp adds clients and spans
+Status: accepted
+Date: 2026-11-01
+Context: `app/ask.py` imports TruLens at module level and CI installs neither TruLens nor
+Snowflake, so `ask()` (retrieval, prompt building, generation, sources) had no offline tests, and
+`tests/test_repo.py` copied `_label` out of the source text to test it.
+Decision: `app/rag_core.py` `RagCore` holds the logic and takes `search(question, top_k)` and
+`complete(model, prompt)` callables. `app/ask.py` `RagApp(RagCore)` supplies the Cortex Search and
+AI_COMPLETE clients (all Snowflake-facing lines and their VERIFYs stay in `ask.py`) and overrides
+`retrieve()`/`generate()` only to carry the unchanged `@instrument` decorators, delegating to
+`super()`. `RagCore.ask()` calls `self.retrieve`/`self.generate`, so the instrumented overrides run.
+The citation label is `app/citations.py` `label()`; `page_texts` moved to `pipeline/parsed_doc.py`.
+`tests/test_rag_core.py` checks from `ask.py`'s source (no TruLens import) that every `@instrument`
+method is overridden in `RagApp`, matches a `RagCore` method's parameters, delegates to `super()`
+and is called from `ask()`, and that the pure modules import no TruLens, Snowflake or pandas.
+Alternatives considered: Free functions called from RagApp (the call graph would be duplicated in
+ask.py and untested); stubbing `trulens` in `sys.modules` in tests (tests the stub, not the code);
+installing TruLens in CI (heavy, and the checks job is meant to stay free of Snowflake packages).
+Consequences: The instrumented methods are one-line overrides; a new instrumented step needs a
+`RagCore` method plus a `RagApp` override, or the guard test fails. That spans still fire through
+`super()` is marked VERIFY until the next evaluation run.
+Reviewer note: Don't flag the one-line `retrieve`/`generate` overrides as redundant, or `RagCore`
+taking clients as callables. Do flag Snowflake or TruLens imports in `rag_core.py`, `citations.py`
+or `parsed_doc.py`, or prompt/retrieval logic added to `RagApp` instead of `RagCore`.
