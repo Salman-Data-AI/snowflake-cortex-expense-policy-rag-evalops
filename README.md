@@ -5,8 +5,8 @@ searched with Cortex Search, answered with AI_COMPLETE, evaluated with TruLens t
 AI Observability, deployed with DCM, and run from one manual GitHub workflow.
 
 Status: **Phase 1 (offline templates).** Nothing here has run against Snowflake yet. Every line
-written from the docs but not yet run carries a `VERIFY` comment; `grep -rn VERIFY .` is the
-Phase 2 checklist.
+written from the docs but not yet run carries a `VERIFY` comment; the Phase 2 checklist below
+has the command that lists them.
 
 ## How it works
 
@@ -36,6 +36,11 @@ Parse twice parses nothing the second time. Tick `reparse_all` to force it.
 ## Repository
 
 ```
+.claude/                  Claude Code settings, check hooks, reviewer agent, review-triage/fix/reply commands
+.githooks/                optional commit-msg hook (`git config core.hooksPath .githooks`)
+CLAUDE.md, REVIEW.md      working rules for Claude Code; Claude PR review instructions and decision index
+docs/decisions.md         design decisions (D-001 ...)
+scripts/                  check_decisions.py (REVIEW.md index vs decisions.md), check_commit_msg.py
 dcm/                      Snowflake objects (DCM project)
   manifest.yml            one target: DEV
   bootstrap.sql           one-time setup by hand: role, admin db, service user, resource monitor
@@ -46,8 +51,10 @@ config/rag.yaml           chunk_size, overlap, top_k, model, prompt_version, jud
 app/                      ask.py (RagApp: Snowflake clients + TruLens spans), rag_core.py (RagCore: the
                           RAG logic, no TruLens/Snowflake), citations.py, prompt_v1.txt, settings.py
 eval/                     questions.csv, run_eval.py, compare.sql, harbor/ (Phase 4)
-tests/                    offline unit tests (chunker, page_texts, ask() with fakes, config, questions, file layout)
-.github/workflows/        checks.yml (every push, no Snowflake), run-pipeline.yml (manual)
+tests/                    offline unit tests (chunker, page_texts, ask() with fakes, config, questions, file layout,
+                          decision index, commit messages)
+.github/workflows/        checks.yml (every push, no Snowflake), run-pipeline.yml (manual),
+                          claude-review.yml (PRs labeled `claude-review`)
 ```
 
 Two deliberate differences from the original plan:
@@ -57,19 +64,30 @@ Two deliberate differences from the original plan:
 
 ## Phase 1 checklist (what's left for you)
 
-- [ ] Download the PDFs listed in `documents/manifest.csv` into `documents/` with those file names,
+- [x] Download the PDFs listed in `documents/manifest.csv` into `documents/` with those file names,
       check the URLs point at current versions, and fill in `download_date`.
-- [ ] Read them and replace every `TODO` in `eval/questions.csv` with the real expected answer.
+- [x] Read them and replace every `TODO` in `eval/questions.csv` with the real expected answer.
       Edit or replace the draft questions freely; keep 2–3 `NONE` rows (answer: "Not in the documents.").
-- [ ] Push to a new GitHub repo and confirm `checks.yml` passes.
+- [x] Push to a new GitHub repo and confirm `checks.yml` passes.
 - [ ] Add the three secret names (values come in Phase 2): `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY`.
+      (`SNOWFLAKE_USER` and `SNOWFLAKE_PRIVATE_KEY` are added; `SNOWFLAKE_ACCOUNT` is still missing.)
 - [ ] Optional: install Snowflake CLI locally (`pipx install snowflake-cli`, 3.24+ for DCM).
+
+## Done beyond the original plan
+
+- CLAUDE.md: working rules for Claude Code (offline only, checks, VERIFY convention) (#2).
+- Python 3.12 everywhere: `.python-version`, `pyproject.toml` and both workflows (#1, #2).
+- Check hooks (ruff on edit; ruff, pytest, sqlfluff on stop) and the `reviewer` agent (#3).
+- Table-aware chunking: markdown tables are kept whole in one chunk (#4).
+- Verifiable gold set: `expected_pages` and `key_facts` in `eval/questions.csv`, checked against the PDFs by a test (#7).
+- TruLens-free core: `rag_core.py`, `citations.py` and `parsed_doc.py` with offline tests (#10).
+- PR review workflow: opt-in Claude review, decision log, triage/fix/reply commands (#5, #6, #8, #9).
 
 ## Running checks locally
 
 ```bash
 pip install -r requirements-dev.txt
-ruff check . && pytest -q && sqlfluff lint pipeline/ eval/
+ruff check . && pytest -q && sqlfluff lint pipeline/ eval/ --dialect snowflake && python scripts/check_decisions.py
 ```
 
 ## Phase 2: first run (summary)
@@ -86,3 +104,26 @@ ruff check . && pytest -q && sqlfluff lint pipeline/ eval/
 Python dependencies: `pip install -r requirements.txt` for the app; the Snowflake CLI is installed
 separately (`pipx install snowflake-cli`) because its dependencies conflict with `trulens-connectors-snowflake`.
 `sqlalchemy` is pinned below 2.1 because `snowflake-sqlalchemy` (pulled in by TruLens) fails to import on 2.1.
+
+## Phase 2 checklist
+
+- [ ] Re-run from Chunk plus an eval; compare Q07 before and after the table fix.
+- [ ] Confirm AI_PARSE_DOCUMENT `page_split` output shape (D-013 and the `page_texts` VERIFY):
+      page indexes contiguous, no text outside pages.
+- [ ] Every document in `PARSED_DOCUMENTS` has more than zero pages.
+- [ ] Check how tables spanning two pages come out of the parser.
+- [ ] Confirm `RagApp.search` passes `top_k` (a run returns `top_k` hits).
+- [ ] Confirm retrieve and generate spans appear in Snowsight's evaluation view (the `super()` delegation VERIFY).
+- [ ] Work through the remaining VERIFY lines. Snowflake-side VERIFY lines (31 as of be04c47):
+
+  ```bash
+  grep -rn VERIFY pipeline app eval dcm config .github/workflows/run-pipeline.yml
+  ```
+
+  `grep -rn VERIFY .` also lists prose mentions and the Claude Code tooling (`.claude/`,
+  `claude-review.yml`); exclude `.venv` if you have one.
+
+## Later
+
+- Policy limits table (audit task 8): deferred until after Phase 3.
+- Empty-retrieval behaviour: to be decided in the Phase 3 prompt v1 vs v2 experiment.
