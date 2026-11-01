@@ -9,23 +9,13 @@ Run from the repo root:  PYTHONPATH=. python pipeline/02_chunk.py
 
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 
 from app.settings import get_session, load_config
 from pipeline.chunker import split_pages
+from pipeline.parsed_doc import page_texts
 
 CHUNKS_TABLE = "RAG_STARTER.RAG.DOCUMENT_CHUNKS"
-
-
-def page_texts(content) -> list[str]:
-    """AI_PARSE_DOCUMENT output with page_split -> list of page markdown, ordered by index."""
-    doc = json.loads(content) if isinstance(content, str) else content
-    if "pages" in doc:
-        pages = sorted(doc["pages"], key=lambda p: p.get("index", 0))
-        return [p.get("content", "") for p in pages]
-    return [doc.get("content", "")]  # parsed without page_split
 
 
 def main() -> None:

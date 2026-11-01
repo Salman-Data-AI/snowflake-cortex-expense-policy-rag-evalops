@@ -18,26 +18,30 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 
 from trulens.core.otel.instrument import instrument
 from trulens.otel.semconv.trace import SpanAttributes
 
-from app.settings import REPO_ROOT, get_session, load_config
+from app.rag_core import RagCore
+from app.settings import get_session, load_config
 
 
-class RagApp:
+class RagApp(RagCore):
+    """RagCore with the Snowflake clients and TruLens spans (D-018).
+
+    Every @instrument method here overrides a RagCore method of the same name and signature and
+    delegates to super(); tests/test_rag_core.py checks this without importing TruLens.
+    """
+
     def __init__(self, session=None, cfg: dict | None = None):
-        self.cfg = cfg or load_config()
+        cfg = cfg or load_config()
         self.session = session or get_session()
-        self.prompt_template = (
-            REPO_ROOT / "app" / f"prompt_{self.cfg['prompt_version']}.txt"
-        ).read_text(encoding="utf-8")
-        db, schema, name = self.cfg["snowflake"]["search_service"].split(".")
+        db, schema, name = cfg["snowflake"]["search_service"].split(".")
         self._search_ref = (db, schema, name)
         self._search_service = None
+        super().__init__(cfg, search=self.search, complete=self._complete)
 
-    # ---------- retrieval ----------
+    # ---------- Snowflake clients ----------
 
     def _service(self):
         if self._search_service is None:
@@ -49,14 +53,25 @@ class RagApp:
             )
         return self._search_service
 
-    def search(self, question: str) -> list[dict]:
+    def search(self, question: str, top_k: int) -> list[dict]:
         """Top-k chunks with their metadata. Not instrumented; retrieve() wraps it."""
         resp = self._service().search(
             query=question,
             columns=["chunk_text", "chunk_id", "file_name", "page_number", "section"],
-            limit=self.cfg["top_k"],
+            limit=top_k,
         )
         return json.loads(resp.to_json())["results"]  # VERIFY: response shape
+
+    def _complete(self, model: str, prompt: str) -> str:
+        row = self.session.sql(
+            "SELECT AI_COMPLETE(?, ?) AS answer",  # VERIFY: AI_COMPLETE(model, prompt) + qmark binding
+            params=[model, prompt],
+        ).collect()[0]
+        return str(row["ANSWER"]).strip()
+
+    # ---------- instrumented steps (logic in RagCore) ----------
+    # VERIFY: TruLens still emits the RETRIEVAL/GENERATION spans when the instrumented override
+    #         delegates to super() and RagCore.ask() calls it through self.
 
     @instrument(
         span_type=SpanAttributes.SpanType.RETRIEVAL,
@@ -67,50 +82,14 @@ class RagApp:
     )
     def retrieve(self, question: str) -> list[str]:
         """Retrieved context as labelled strings; the labels are what the model cites."""
-        self._last_hits = self.search(question)
-        return [self._label(h) + "\n" + h["chunk_text"] for h in self._last_hits]
-
-    @staticmethod
-    def _label(hit: dict) -> str:
-        return f"[{hit['file_name']} p.{hit['page_number']}]"
-
-    # ---------- generation ----------
+        return super().retrieve(question)
 
     @instrument(span_type=SpanAttributes.SpanType.GENERATION)
     def generate(self, question: str, contexts: list[str]) -> str:
-        prompt = self.prompt_template.format(
-            context="\n\n---\n\n".join(contexts), question=question
-        )
-        row = self.session.sql(
-            "SELECT AI_COMPLETE(?, ?) AS answer",  # VERIFY: AI_COMPLETE(model, prompt) + qmark binding
-            params=[self.cfg["model"], prompt],
-        ).collect()[0]
-        return str(row["ANSWER"]).strip()
+        return super().generate(question, contexts)
 
     # ---------- entry points ----------
-
-    def ask(self, question: str) -> dict:
-        """Answer plus sources and timing, for people and for Harbor."""
-        t0 = time.perf_counter()
-        contexts = self.retrieve(question)
-        answer = self.generate(question, contexts)
-        return {
-            "question": question,
-            "answer": answer,
-            "sources": [
-                {
-                    "chunk_id": h["chunk_id"],
-                    "file_name": h["file_name"],
-                    "page_number": h["page_number"],
-                    "section": h.get("section", ""),
-                }
-                for h in self._last_hits
-            ],
-            "latency_ms": round((time.perf_counter() - t0) * 1000),
-            "model": self.cfg["model"],
-            "prompt_version": self.cfg["prompt_version"],
-            "top_k": self.cfg["top_k"],
-        }
+    # ask() is inherited from RagCore: it is not instrumented.
 
     def answer(self, question: str) -> str:
         """What TruLens calls for each test question.
